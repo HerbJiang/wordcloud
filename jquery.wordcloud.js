@@ -1,7 +1,8 @@
 /*!
- 
  Simple <canvas> Word Cloud
  by timdream
+ 
+ cutomized by HitHot.cc
 
  usage:
   $('#canvas').wordCloud(settings); // draw word cloud on #canvas.
@@ -31,6 +32,14 @@
 	clearCanvas: clear canvas before drawing. Faster than running detection on what's already on it.
 	fillBox: true will mark the entire box containing the word as filled - no subsequent smaller words can be fit in the gap.
  
+ 
+    trace mousemove and catch keyword under.
+    startCallback: must be function
+    finishCallback: must be function
+    clickCallback: must be function
+    zoomToFit: true / false
+    zoomToFitWidthPercentage: 0 to 1
+    zoomToFitHeightPercentage: 0 to 1
 */
 
 "use strict";
@@ -110,7 +119,7 @@ if (!window.clearImmediate) {
 }
 
 (function ($) {
-
+	
 	$.wordCloudSupported = (function () {
 		var $c = $('<canvas />'), ctx;
 		if (!$c[0] || !$c[0].getContext) return false;
@@ -119,6 +128,9 @@ if (!window.clearImmediate) {
 		if (!ctx.fillText) return false;
 		if (!Array.prototype.some) return false;
 		if (!Array.prototype.push) return false;
+		if (/opera mini/i.test(window.navigator.userAgent.toLowerCase())) return false;
+		if ($.browser.msie && /msie 7\.0/i.test(window.navigator.userAgent.toLowerCase())) return false;
+		
 		return true;
 	}());
 
@@ -145,9 +157,11 @@ if (!window.clearImmediate) {
 
 	$.fn.wordCloud = function (options) {
 		if (!$.wordCloudSupported) return this;
-	
+			
 		var settings = {
-			fontFamily: '"Trebuchet MS", "Heiti TC", "微軟正黑體", "Arial Unicode MS", "Droid Fallback Sans", sans-serif',
+			adjustX: 0,
+			adjustY: 0,
+			fontFamily: '"Helvetica Neue",Arial,微軟正黑體,"Microsoft JhengHei","Microsoft YaHei","Lucida Grande","Lucida Sans Unicode",sans-serif',//'"Trebuchet MS", "Heiti TC", "微軟正黑體", "Arial Unicode MS", "Droid Fallback Sans", sans-serif',
 			gridSize: 8,
 			ellipticity: 0.65,
 			center: false,
@@ -155,7 +169,7 @@ if (!window.clearImmediate) {
 			maskColor: 'rgba(255,0,0,0.3)',
 			maskGridWidth: 0.3,
 			wordColor: 'random-dark',
-			backgroundColor: '#fff',  //opaque white = rgba(255, 255, 255, 1)
+			backgroundColor: 'rgba(0, 0, 0, 0)',//'#fff',  //opaque white = rgba(255, 255, 255, 1)
 			wait: 0,
 			abortThreshold: 0, // disabled
 			abort: $.noop,
@@ -164,7 +178,8 @@ if (!window.clearImmediate) {
 			wordList: [],
 			rotateRatio: 0.1,
 			clearCanvas: true,
-			fillBox: false
+			fillBox: false,
+			finished: false
 		};
 
 		if (options) { 
@@ -181,7 +196,7 @@ if (!window.clearImmediate) {
 		settings.gridSize = Math.max(settings.gridSize, 4);
 
 		var g = settings.gridSize,
-			ctx, grid, ngx, ngy, diffChannel, bgPixel,
+			ctx, grid, gridWord, ngx, ngy, diffChannel, bgPixel,
 			escapeTime,
 			wordColor = function (word, weight, fontSize, radius, theta) {
 				switch (settings.wordColor) {
@@ -196,6 +211,12 @@ if (!window.clearImmediate) {
 							+ Math.floor(Math.random()*128 + 128).toString(10) + ','
 							+ Math.floor(Math.random()*128 + 128).toString(10) + ','
 							+ Math.floor(Math.random()*128 + 128).toString(10) + ')';
+					break;
+					case 'random-normal':
+						return 'rgb('
+							+ Math.floor(Math.random()*64 + 128).toString(10) + ','
+							+ Math.floor(Math.random()*128 + 32).toString(10) + ','
+							+ Math.floor(Math.random()*128 + 32).toString(10) + ')';
 					break;
 					default:
 					if (typeof settings.wordColor !== 'function') {
@@ -239,7 +260,7 @@ if (!window.clearImmediate) {
 								) return false;
 							}
 						}
-					}
+					}		
 				}
 				return true;
 			},
@@ -256,7 +277,7 @@ if (!window.clearImmediate) {
 					}
 				}
 			},
-			updateGrid = function (gx, gy, gw, gh) {
+			updateGrid = function (gx, gy, gw, gh, word, weight, fontSize, radius, theta, w, h, mu, rotate) {
 				var x = gw, y;
 				if (settings.drawMask) ctx.fillStyle = settings.maskColor;
 				/*
@@ -270,12 +291,54 @@ if (!window.clearImmediate) {
 					while (y--) {
 						if (!isGridEmpty(imgData, x*g, y*g, gw*g, gh*g)) {
 							grid[gx + x][gy + y] = false;
+							gridWord[gx + x][gy + y] = [word, gx, gy, gw, gh, weight, fontSize, radius, theta, w, h, mu, rotate];
+							
 							if (settings.drawMask) {
 								ctx.fillRect((gx + x)*g, (gy + y)*g, g-settings.maskGridWidth, g-settings.maskGridWidth);
 							}
 						}
 						if (exceedTime()) break out;
 					}
+				}
+			},
+			// Herb modified. for reuse in event 
+			drawWord = function(word, weight, fontSize, radius, theta, gx, gy, gw, gh, w, h, mu, rotate, adjustHnW) {
+				var newX, newY;
+				if (true) {//adjustHnW) {
+					newX = gx*g + (gw*g - w)/2;
+					newY = gy*g + (gh*g - h)/2;
+				}
+				else {
+					newX = gx*g;
+					newY = gy*g;
+				}
+				if (mu !== 1 || rotate) {
+					var fc = document.createElement('canvas');
+					fc.setAttribute('width', w*mu);
+					fc.setAttribute('height', h*mu);
+					var fctx = fc.getContext('2d');
+					fctx.fillStyle = settings.backgroundColor;
+					fctx.fillRect(0, 0, w*mu, h*mu);
+					fctx.fillStyle = wordColor(word, weight, fontSize, radius, theta);
+					fctx.font = (fontSize*mu).toString(10) + 'px ' + settings.fontFamily;				
+					fctx.textBaseline = 'top';
+					if (rotate) {
+						fctx.translate(0, h*mu);
+						fctx.rotate(-Math.PI/2);
+					}
+					if (!adjustHnW) {
+						fctx.fillStyle = "blue";
+					}
+					fctx.fillText(word, Math.floor(fontSize*mu/6), 0);
+					//ctx.clearRect(Math.floor(newX), Math.floor(newY), w, h);
+					ctx.drawImage(fc, Math.floor(newX), Math.floor(newY), w, h);
+				} else {
+					ctx.font = fontSize.toString(10) + 'px ' + settings.fontFamily;
+					ctx.fillStyle = wordColor(word, weight, fontSize, radius, theta);
+					if (!adjustHnW) {
+						ctx.fillStyle = "blue";
+					}
+					ctx.fillText(word, newX, newY);
 				}
 			},
 			putWord = function (word, weight) {
@@ -326,33 +389,8 @@ if (!window.clearImmediate) {
 					if (points.shuffle().some(
 						function (gxy) {
 							if (canFitText(gxy[0], gxy[1], gw, gh)) {
-								if (mu !== 1 || rotate) {
-									var fc = document.createElement('canvas');
-									fc.setAttribute('width', w*mu);
-									fc.setAttribute('height', h*mu);
-									var fctx = fc.getContext('2d');
-									fctx.fillStyle = settings.backgroundColor;
-									fctx.fillRect(0, 0, w*mu, h*mu);
-									fctx.fillStyle = wordColor(word, weight, fontSize, R-r, gxy[2]);
-									fctx.font = (fontSize*mu).toString(10) + 'px ' + settings.fontFamily;				
-									fctx.textBaseline = 'top';
-									if (rotate) {
-										fctx.translate(0, h*mu);
-										fctx.rotate(-Math.PI/2);
-									}
-									fctx.fillText(word, Math.floor(fontSize*mu/6), 0);
-									ctx.clearRect(Math.floor(gxy[0]*g + (gw*g - w)/2), Math.floor(gxy[1]*g + (gh*g - h)/2), w, h);
-									ctx.drawImage(fc, Math.floor(gxy[0]*g + (gw*g - w)/2), Math.floor(gxy[1]*g + (gh*g - h)/2), w, h);
-								} else {
-									ctx.font = fontSize.toString(10) + 'px ' + settings.fontFamily;
-									ctx.fillStyle = wordColor(word, weight, fontSize, R-r, gxy[2]);
-									ctx.fillText(word, gxy[0]*g + (gw*g - w)/2, gxy[1]*g + (gh*g - h)/2);
-								}
-								if (settings.fillBox) {
-									fillGrid(gxy[0], gxy[1], gw, gh);
-								} else {
-									updateGrid(gxy[0], gxy[1], gw, gh);
-								}
+								drawWord(word, weight, fontSize, R-r, gxy[2], gxy[0], gxy[1], gw, gh, w, h, mu, rotate, true);
+								updateGrid(gxy[0], gxy[1], gw, gh, word, weight, fontSize, R-r, gxy[2], w, h, mu, rotate);
 								return true;
 							}
 							return false;
@@ -373,16 +411,120 @@ if (!window.clearImmediate) {
 				return true;
 			};
 
+		/*
+		 by Herb: When mouse moving, try to find out which word under cursor.
+		 The putImageData(img, x, y, h, w) function only works in Firefox.
+		 But use putImageData(img, x, y) works in both Firefox, Chrome & IE9.
+		 */
+		var lastImageData = false, lastGx = false, lastGy = false;
+		this.mousemove(function(e) {
+			if (!settings.finished) return;
+			var xMousePos, yMousePos, xMousePosMax, yMousePosMax;
+
+			if (document.layers) {
+				xMousePos = e.pageX;
+				yMousePos = e.pageY;
+				xMousePosMax = window.innerWidth+window.pageXOffset;
+				yMousePosMax = window.innerHeight+window.pageYOffset;
+			} else if (document.all) {
+				xMousePos = window.event.x+document.body.scrollLeft;
+				yMousePos = window.event.y+document.body.scrollTop;
+				xMousePosMax = document.body.clientWidth+document.body.scrollLeft;
+				yMousePosMax = document.body.clientHeight+document.body.scrollTop;
+			} else if (document.getElementById) {
+				xMousePos = e.pageX;
+				yMousePos = e.pageY;
+				xMousePosMax = window.innerWidth+window.pageXOffset;
+				yMousePosMax = window.innerHeight+window.pageYOffset;
+			}
+
+			var x,y;
+			x = xMousePos + settings.adjustX();
+			y = yMousePos + settings.adjustY();
+			
+			var gx = Math.ceil(x/g);
+			var gy = Math.ceil(y/g);
+			
+			if (lastImageData) {
+				var ww = gridWord[lastGx][lastGy];
+				ctx.putImageData(lastImageData, (ww[1]-0)*g, (ww[2]-0)*g);
+				lastImageData = false;
+			}
+			
+			if (gridWord[gx][gy]) {
+				var ww = gridWord[gx][gy];
+				lastImageData = ctx.getImageData((ww[1]-0)*g, (ww[2]-0)*g, (ww[3]+0)*g, (ww[4]+0)*g);
+				lastGx = gx; 
+				lastGy = gy;
+				drawWord(ww[0], ww[5], ww[6], ww[7], ww[8], ww[1], ww[2], ww[3], ww[4], ww[9], ww[10], ww[11], ww[12], false);
+			}
+		});
+		this.click(function(e) {
+			var xMousePos, yMousePos, xMousePosMax, yMousePosMax;
+
+			if (document.layers) {
+				xMousePos = e.pageX;
+				yMousePos = e.pageY;
+				xMousePosMax = window.innerWidth+window.pageXOffset;
+				yMousePosMax = window.innerHeight+window.pageYOffset;
+			} else if (document.all) {
+				xMousePos = window.event.x+document.body.scrollLeft;
+				yMousePos = window.event.y+document.body.scrollTop;
+				xMousePosMax = document.body.clientWidth+document.body.scrollLeft;
+				yMousePosMax = document.body.clientHeight+document.body.scrollTop;
+			} else if (document.getElementById) {
+				xMousePos = e.pageX;
+				yMousePos = e.pageY;
+				xMousePosMax = window.innerWidth+window.pageXOffset;
+				yMousePosMax = window.innerHeight+window.pageYOffset;
+			}
+
+			var x,y;
+			x = xMousePos + settings.adjustX();
+			y = yMousePos + settings.adjustY();
+			
+			var gx = Math.ceil(x/g);
+			var gy = Math.ceil(y/g);
+			
+			if (gridWord[gx][gy] && typeof settings.clickCallback == 'function') {
+				settings.clickCallback(gridWord[gx][gy][0]);
+			}
+
+		});
+		
 
 		return this.each(function() {
 			if (this.nodeName.toLowerCase() !== 'canvas') return;
 
 			var $el = $(this);
+			
+			if (!(settings.zoomToFit === undefined) && settings.zoomToFit) {
+				var newWidth, newHeight;
+				
+				if (settings.zoomToFitWidthPercetage === undefined) {
+					$el.attr('width', Math.floor(window.innerWidth * 1));
+				}
+				else {
+					$el.attr('width', Math.floor(window.innerWidth * settings.zoomToFitWidthPercetage));
+				}
+				
+				if (settings.zoomToFitHeightPercetage === undefined) {
+					$el.attr('height', Math.floor(window.innerHeight * 1));
+				}
+				else {
+					$el.attr('height', Math.floor(window.innerHeight * settings.zoomToFitHeightPercetage));
+				}
+			}
 
+			if (typeof settings.startCallback == 'function') {
+				settings.startCallback();
+			}
+			
 			ngx = Math.floor($el.attr('width')/g);
 			ngy = Math.floor($el.attr('height')/g);
 			ctx = this.getContext('2d'), 
 			grid = [];
+			gridWord = []; // for store word occupy which grid
 
 			/* in order to get more a correct reading on difference,
 			 do clearRect */
@@ -417,9 +559,11 @@ if (!window.clearImmediate) {
 			var x = ngx, y;
 			while (x--) {
 				grid[x] = [];
+				gridWord[x] = [];
 				y = ngy;
 				while (y--) {
 					grid[x][y] = true;
+					gridWord[x][y] = false;
 				}
 			}
 
@@ -430,35 +574,44 @@ if (!window.clearImmediate) {
 			} else {
 				updateGrid(0, 0, ngx, ngy);
 			}
-			
+
 
 			ctx.textBaseline = 'top';
-
 			// cancel previous wordcloud action by trigger
 			$el.trigger('wordcloudstart');
 			
 			var i = 0;
 			if (settings.wait !== 0) {
 				var timer = setInterval(
-					function () {
-						if (i >= settings.wordList.length) {
-							clearTimeout(timer);
-							$el.trigger('wordcloudstop');
-							// console.log(d.getTime() - (new Date()).getTime());
-							return;
+				function () {
+					if (i >= settings.wordList.length) {
+						clearTimeout(timer);
+						$el.trigger('wordcloudstop');
+						// console.log(d.getTime() - (new Date()).getTime());
+						
+						if (typeof settings.finishCallback == 'function') {
+							settings.finishCallback();
 						}
-						escapeTime = (new Date()).getTime();
-						putWord(settings.wordList[i][0], settings.wordList[i][1]);
-						if (exceedTime()) {
-							clearTimeout(timer);
-							settings.abort();
-							$el.trigger('wordcloudabort');
-							$el.trigger('wordcloudstop');
+						settings.finished = true;
+						return;
+					}
+					escapeTime = (new Date()).getTime();
+					putWord(settings.wordList[i][0], settings.wordList[i][1]);
+					if (exceedTime()) {
+						clearTimeout(timer);
+						settings.abort();
+						$el.trigger('wordcloudabort');
+						$el.trigger('wordcloudstop');
+
+						if (typeof settings.finishCallback == 'function') {
+							settings.finishCallback();
 						}
-						i++;
-					},
-					settings.wait
-				);
+						settings.finished = true;
+					}
+					i++;
+				},
+				settings.wait
+			);
 				$el.one(
 					'wordcloudstart',
 					function (ev) {
