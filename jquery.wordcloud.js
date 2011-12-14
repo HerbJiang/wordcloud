@@ -40,6 +40,7 @@
     zoomToFit: true / false
     zoomToFitWidthPercentage: 0 to 1
     zoomToFitHeightPercentage: 0 to 1
+    fasterGridEmptyChecker: true / false
 */
 
 "use strict";
@@ -119,7 +120,6 @@ if (!window.clearImmediate) {
 }
 
 (function ($) {
-	
 	$.wordCloudSupported = (function () {
 		var $c = $('<canvas />'), ctx;
 		if (!$c[0] || !$c[0].getContext) return false;
@@ -171,13 +171,14 @@ if (!window.clearImmediate) {
 			wordColor: 'random-dark',
 			backgroundColor: 'rgba(0, 0, 0, 0)',//'#fff',  //opaque white = rgba(255, 255, 255, 1)
 			wait: 0,
-			abortThreshold: 0, // disabled
+			abortThreshold: 1000, // disabled
 			abort: $.noop,
 			weightFactor: 1,
 			minSize: $.miniumFontSize / 2, // 0 to disable
 			wordList: [],
 			rotateRatio: 0.1,
 			clearCanvas: true,
+			fasterGridEmptyChecker: false,
 			fillBox: false,
 			finished: false
 		};
@@ -218,6 +219,34 @@ if (!window.clearImmediate) {
 							+ Math.floor(Math.random()*128 + 32).toString(10) + ','
 							+ Math.floor(Math.random()*128 + 32).toString(10) + ')';
 					break;
+					case 'random-impress':
+						var cap = Math.floor(Math.random() * 2) + 2;
+						var rnd = 1;
+						var r,g,b;
+						if (Math.floor(Math.random() * 2) > 0 && ++rnd <= cap) {
+							r = Math.floor(Math.random()*64 + 128).toString(10);
+						}
+						else {
+							r = Math.floor(Math.random()*32 + 0).toString(10);
+						}
+						if ((cap - rnd > 1 || Math.floor(Math.random() * 2) > 0) && ++rnd <= cap) {
+							g = Math.floor(Math.random()*64 + 128).toString(10);
+						}
+						else {
+							g = Math.floor(Math.random()*32 + 0).toString(10);
+						}
+						if ((cap - rnd > 0 || Math.floor(Math.random() * 2) > 0) && ++rnd <= cap) {
+							b = Math.floor(Math.random()*64 + 128).toString(10);
+						}
+						else {
+							b = Math.floor(Math.random()*32 + 0).toString(10);
+						}
+						
+						return 'rgb('
+							+ r + ','
+							+ g + ','
+							+ b + ')';
+					break;
 					default:
 					if (typeof settings.wordColor !== 'function') {
 						return settings.wordColor;
@@ -236,6 +265,20 @@ if (!window.clearImmediate) {
 				return data[
 					(y*w+x)*4+c
 				];
+			},
+			isGridEmptyFast = function (imgData, gx, gy, gw, gh) {
+				var i=gw, j=gh;
+				while (i--) {
+					if ((gx + i) >= ngx) continue;
+					j = gh;
+					
+					while (j--) {
+						if ((gy + j) >= ngy) continue;
+						if (typeof(grid[gx+i][gy+j]) != undefined && grid[gx+i][gy+j]) return false;
+					}
+				}
+				
+				return true;
 			},
 			isGridEmpty = function (imgData, x, y, w, h) {
 				var i = g, j;
@@ -277,68 +320,185 @@ if (!window.clearImmediate) {
 					}
 				}
 			},
-			updateGrid = function (gx, gy, gw, gh, word, weight, fontSize, radius, theta, w, h, mu, rotate) {
-				var x = gw, y;
+			updateGrid = function (wordData) {
+				var x = wordData.gw, y;
 				if (settings.drawMask) ctx.fillStyle = settings.maskColor;
 				/*
 				getImageData() is a super expensive function
 				(internally, extracting pixels of _entire canvas_ all the way from GPU),
 				call once here instead of every time in isGridEmpty
 				*/
-				var imgData = ctx.getImageData(gx*g, gy*g, gw*g, gh*g);
+				var imgData = ctx.getImageData(wordData.gx*g, wordData.gy*g, wordData.gw*g, wordData.gh*g);
 				out: while (x--) {
-					y = gh;
+					y = wordData.gh;
 					while (y--) {
-						if (!isGridEmpty(imgData, x*g, y*g, gw*g, gh*g)) {
-							grid[gx + x][gy + y] = false;
-							gridWord[gx + x][gy + y] = [word, gx, gy, gw, gh, weight, fontSize, radius, theta, w, h, mu, rotate];
+						if ((settings.fasterGridEmptyChecker && !isGridEmptyFast(imgData, x, y, wordData.gw, wordData.gh)) || !isGridEmpty(imgData, x*g, y*g, wordData.gw*g, wordData.gh*g)) {
+							grid[wordData.gx + x][wordData.gy + y] = false;
+							gridWord[wordData.gx + x][wordData.gy + y] = wordData;
 							
 							if (settings.drawMask) {
-								ctx.fillRect((gx + x)*g, (gy + y)*g, g-settings.maskGridWidth, g-settings.maskGridWidth);
+								ctx.fillRect((wordData.gx + x)*g, (wordData.gy + y)*g, g-settings.maskGridWidth, g-settings.maskGridWidth);
 							}
 						}
 						if (exceedTime()) break out;
 					}
 				}
 			},
-			// Herb modified. for reuse in event 
-			drawWord = function(word, weight, fontSize, radius, theta, gx, gy, gw, gh, w, h, mu, rotate, adjustHnW) {
-				var newX, newY;
-				if (true) {//adjustHnW) {
-					newX = gx*g + (gw*g - w)/2;
-					newY = gy*g + (gh*g - h)/2;
+			drawShadowEffects = function(ctx, text, w, h, offsetX, offsetY, tw, th, fontSize, blurColor, rotate, mu, highlight) {
+				var fc = document.createElement('canvas');
+				fc.setAttribute('width', w);
+				fc.setAttribute('height', h);
+				var fctx = fc.getContext('2d');
+				fctx.textBaseline = 'top';
+				fctx.font = fontSize.toString(10) + 'px ' + settings.fontFamily;
+				
+				var blurStep = Math.floor(fontSize / 50);
+				
+				if (rotate) {
+					fctx.translate(0, h);
+					fctx.rotate(-Math.PI/2);
+				
+					// gather information about the height of the font
+					var textHeight = tw;
+					// loop through text-shadow based effects
+					var textWidth = th;
+
+					// just a hack, make the word more vertical centerlized.
+					offsetY += (textHeight - fctx.measureText('\uFF37').width) / 2;
+
+					// parse text-shadows from css
+					var shadows1 = [
+					               {x:0,y:0,blur:blurStep,color:"#fff"},
+					               {x:0,y:0,blur:blurStep*2,color:"#fff"},
+					               {x:0,y:0,blur:blurStep*5,color:blurColor},
+					               {x:0,y:0,blur:blurStep*7,color:blurColor},
+					               ]; 
+					
+					var shadows2 = [
+					                {x:-0.03*textHeight,y:0,blur:0,color:"red"},
+					                {x:0.03*textHeight,y:0,blur:0,color:"cyan"},
+					                ];
+
+					var shadows3 = [
+					                {x:0,y:0,blur:blurStep/2,color:blurColor},
+					                {x:0,y:0,blur:blurStep,color:blurColor},
+					                {x:0,y:0,blur:blurStep*1.5,color:blurColor},
+					                ];
+					var shadows4 = [
+					                {x:0,y:0,blur:blurStep,color:"#232323"},
+					                {x:0.01*textHeight,y:0.01*textHeight,blur:blurStep/10,color:"#232323"},
+					                ];
+										
+					var shadows = highlight ? shadows1 : shadows4;
+					// loop through the shadow collection
+					var n = shadows.length; while(n--) {
+						var shadow = shadows[n];
+						var totalWidth = textWidth + shadow.blur * 2;
+						fctx.save();
+						fctx.beginPath();
+						fctx.fillStyle = "red";
+						fctx.rect(0, 0, textWidth, textHeight);
+						fctx.clip();
+						if (shadow.blur) { // just run shadow (clip text)
+							fctx.shadowColor = shadow.color;
+							fctx.shadowOffsetX = shadow.x + totalWidth;
+							fctx.shadowOffsetY = shadow.y;
+							fctx.shadowBlur = shadow.blur;
+							fctx.fillText(text, offsetX, offsetY - totalWidth);
+						} else { // just run pseudo-shadow
+							fctx.fillStyle = shadow.color;
+							fctx.fillText(text, offsetX + (shadow.x||0), offsetY - (shadow.y||0));
+						}
+						fctx.restore();
+					}
+					// drawing the text in the foreground
+					var grd = fctx.createLinearGradient(offsetX, offsetY, offsetX,  offsetY+textHeight);
+						grd.addColorStop(0, "#fff");
+						grd.addColorStop(.3, blurColor);
+					fctx.fillStyle = blurColor;
+					fctx.fillStyle = grd;
+					fctx.fillText(text, offsetX, offsetY);
 				}
 				else {
-					newX = gx*g;
-					newY = gy*g;
+					// gather information about the height of the font
+					var textHeight = th;
+					// loop through text-shadow based effects
+					var textWidth = tw;
+					
+					// just a hack, make the word more vertical centerlized.
+					offsetY += (textHeight - fctx.measureText('\uFF37').width) / 2;		
+
+					// parse text-shadows from css
+					var shadows1 = [
+					               {x:0,y:0,blur:blurStep,color:"#fff"},
+					               {x:0,y:0,blur:blurStep*2,color:"#fff"},
+					               {x:0,y:0,blur:blurStep*5,color:blurColor},
+					               {x:0,y:0,blur:blurStep*7,color:blurColor},
+					               ]; 
+					
+					var shadows2 = [
+					                {x:-0.03*textHeight,y:0,blur:0,color:"red"},
+					                {x:0.03*textHeight,y:0,blur:0,color:"cyan"},
+					                ];
+
+					var shadows3 = [
+					                {x:0,y:0,blur:blurStep/2,color:blurColor},
+					                {x:0,y:0,blur:blurStep,color:blurColor},
+					                {x:0,y:0,blur:blurStep*1.5,color:blurColor},
+					                ];
+					var shadows4 = [
+					                {x:0,y:0,blur:blurStep,color:"#232323"},
+					                {x:0.01*textHeight,y:0.01*textHeight,blur:blurStep/10,color:"#232323"},
+					                ];
+					
+					var shadows = highlight ? shadows1 : shadows4;
+					// loop through the shadow collection
+					var n = shadows.length; while(n--) {
+						var shadow = shadows[n];
+						var totalWidth = textWidth + shadow.blur * 2;
+						fctx.save();
+						fctx.beginPath();
+						fctx.fillStyle = "red";
+						fctx.rect(0, 0, textWidth, textHeight);
+						fctx.clip();
+						if (shadow.blur) { // just run shadow (clip text)
+							fctx.shadowColor = shadow.color;
+							fctx.shadowOffsetX = shadow.x + totalWidth;
+							fctx.shadowOffsetY = shadow.y;
+							fctx.shadowBlur = shadow.blur;
+							fctx.fillText(text, offsetX - totalWidth, offsetY);
+						} else { // just run pseudo-shadow
+							fctx.fillStyle = shadow.color;
+							fctx.fillText(text, offsetX + (shadow.x||0), offsetY - (shadow.y||0));
+						}
+						fctx.restore();
+					}
+					// drawing the text in the foreground
+					var grd = fctx.createLinearGradient(offsetX, offsetY, offsetX,  offsetY+textHeight);
+						grd.addColorStop(0, "#fff");
+						grd.addColorStop(.3, blurColor);
+					fctx.fillStyle = blurColor;
+					fctx.fillStyle = grd;
+					fctx.fillText(text, offsetX, offsetY);
 				}
-				if (mu !== 1 || rotate) {
-					var fc = document.createElement('canvas');
-					fc.setAttribute('width', w*mu);
-					fc.setAttribute('height', h*mu);
-					var fctx = fc.getContext('2d');
-					fctx.fillStyle = settings.backgroundColor;
-					fctx.fillRect(0, 0, w*mu, h*mu);
-					fctx.fillStyle = wordColor(word, weight, fontSize, radius, theta);
-					fctx.font = (fontSize*mu).toString(10) + 'px ' + settings.fontFamily;				
-					fctx.textBaseline = 'top';
-					if (rotate) {
-						fctx.translate(0, h*mu);
-						fctx.rotate(-Math.PI/2);
-					}
-					if (!adjustHnW) {
-						fctx.fillStyle = "blue";
-					}
-					fctx.fillText(word, Math.floor(fontSize*mu/6), 0);
-					//ctx.clearRect(Math.floor(newX), Math.floor(newY), w, h);
-					ctx.drawImage(fc, Math.floor(newX), Math.floor(newY), w, h);
+				return fc;
+			},
+			// For reuse in event 
+			drawWord = function(wordData, highlight) {
+				var offsetX = (wordData.gw*g - wordData.w)/2, offsetY = (wordData.gh*g - wordData.h)/2;
+				var newX = wordData.gx*g + offsetX, newY = wordData.gy*g + offsetY;
+				var outW = wordData.gw*g, outH = wordData.gh*g;
+
+				var rndColor = ("color" in wordData) ? wordData.color : wordColor(wordData.word, wordData.weight, wordData.fontSize, wordData.r, wordData.theta);
+				$.extend(wordData, {color: rndColor});
+					
+				if (wordData.mu !== 1 || wordData.rotate) {
+					var fc = drawShadowEffects(ctx, wordData.word, outW*wordData.mu, outH*wordData.mu, offsetX, offsetY, wordData.w, wordData.h, wordData.fontSize, rndColor, wordData.rotate, wordData.mu, highlight);
+					ctx.drawImage(fc, Math.floor(newX), Math.floor(newY), outW, outH);
 				} else {
-					ctx.font = fontSize.toString(10) + 'px ' + settings.fontFamily;
-					ctx.fillStyle = wordColor(word, weight, fontSize, radius, theta);
-					if (!adjustHnW) {
-						ctx.fillStyle = "blue";
-					}
-					ctx.fillText(word, newX, newY);
+					ctx.font = wordData.fontSize.toString(10) + 'px ' + settings.fontFamily;
+					var fc = drawShadowEffects(ctx, wordData.word, outW, outH, offsetX, offsetY, wordData.w, wordData.h, wordData.fontSize, rndColor, wordData.rotate, wordData.mu, highlight);
+					ctx.drawImage(fc, Math.floor(newX), Math.floor(newY), outW, outH);
 				}
 			},
 			putWord = function (word, weight) {
@@ -358,14 +518,14 @@ if (!window.clearImmediate) {
 					var h = ctx.measureText(word).width/mu,
 						w = Math.max(fontSize*mu, ctx.measureText('m').width, ctx.measureText('\uFF37').width)/mu;
 					if (/[Jgpqy]/.test(word)) w *= 3/2;
-					w += Math.floor(fontSize/6);
-					h += Math.floor(fontSize/6);
+					w += Math.floor(fontSize/8);
+					h += Math.floor(fontSize/8);
 				} else {
 					var w = ctx.measureText(word).width/mu,
 						h = Math.max(fontSize*mu, ctx.measureText('m').width, ctx.measureText('\uFF37').width)/mu;
 					if (/[Jgpqy]/.test(word)) h *= 3/2;
-					h += Math.floor(fontSize/6);
-					w += Math.floor(fontSize/6);
+					h += Math.floor(fontSize/8);
+					w += Math.floor(fontSize/8);
 				}
 				w = Math.ceil(w);
 				h = Math.ceil(h);
@@ -389,8 +549,10 @@ if (!window.clearImmediate) {
 					if (points.shuffle().some(
 						function (gxy) {
 							if (canFitText(gxy[0], gxy[1], gw, gh)) {
-								drawWord(word, weight, fontSize, R-r, gxy[2], gxy[0], gxy[1], gw, gh, w, h, mu, rotate, true);
-								updateGrid(gxy[0], gxy[1], gw, gh, word, weight, fontSize, R-r, gxy[2], w, h, mu, rotate);
+								//word, weight, fontSize, radius, theta, gx, gy, gw, gh, w, h, mu, rotate
+								var wordData = {word:word, weight:weight, fontSize:fontSize, r:R-r, theta:gxy[2], gx:gxy[0], gy:gxy[1], gw:gw, gh:gh, w:w, h:h, mu:mu, rotate:rotate};
+								drawWord(wordData, false);
+								updateGrid(wordData);
 								return true;
 							}
 							return false;
@@ -412,7 +574,7 @@ if (!window.clearImmediate) {
 			};
 
 		/*
-		 by Herb: When mouse moving, try to find out which word under cursor.
+		 When mouse moving, try to find out which word under cursor.
 		 The putImageData(img, x, y, h, w) function only works in Firefox.
 		 But use putImageData(img, x, y) works in both Firefox, Chrome & IE9.
 		 */
@@ -447,16 +609,16 @@ if (!window.clearImmediate) {
 			
 			if (lastImageData) {
 				var ww = gridWord[lastGx][lastGy];
-				ctx.putImageData(lastImageData, (ww[1]-0)*g, (ww[2]-0)*g);
+				ctx.putImageData(lastImageData, (ww.gx-0)*g, (ww.gy-0)*g);
 				lastImageData = false;
 			}
 			
 			if (gridWord[gx][gy]) {
 				var ww = gridWord[gx][gy];
-				lastImageData = ctx.getImageData((ww[1]-0)*g, (ww[2]-0)*g, (ww[3]+0)*g, (ww[4]+0)*g);
+				lastImageData = ctx.getImageData((ww.gx-0)*g, (ww.gy-0)*g, (ww.gw+0)*g, (ww.gh+0)*g);
 				lastGx = gx; 
 				lastGy = gy;
-				drawWord(ww[0], ww[5], ww[6], ww[7], ww[8], ww[1], ww[2], ww[3], ww[4], ww[9], ww[10], ww[11], ww[12], false);
+				drawWord(ww, true);
 			}
 		});
 		this.click(function(e) {
@@ -487,11 +649,10 @@ if (!window.clearImmediate) {
 			var gy = Math.ceil(y/g);
 			
 			if (gridWord[gx][gy] && typeof settings.clickCallback == 'function') {
-				settings.clickCallback(gridWord[gx][gy][0]);
+				settings.clickCallback(gridWord[gx][gy].word);
 			}
 
-		});
-		
+		});		
 
 		return this.each(function() {
 			if (this.nodeName.toLowerCase() !== 'canvas') return;
@@ -572,7 +733,7 @@ if (!window.clearImmediate) {
 				ctx.clearRect(0, 0, ngx*(g+1), ngy*(g+1));
 				ctx.fillRect(0, 0, ngx*(g+1), ngy*(g+1));
 			} else {
-				updateGrid(0, 0, ngx, ngy);
+				updateGrid({gx:0, gy:0, gw:ngx, gh:ngy});
 			}
 
 
@@ -581,53 +742,63 @@ if (!window.clearImmediate) {
 			$el.trigger('wordcloudstart');
 			
 			var i = 0;
+			var stop = false;
 			if (settings.wait !== 0) {
 				var timer = setInterval(
-				function () {
-					if (i >= settings.wordList.length) {
-						clearTimeout(timer);
-						$el.trigger('wordcloudstop');
-						// console.log(d.getTime() - (new Date()).getTime());
-						
-						if (typeof settings.finishCallback == 'function') {
-							settings.finishCallback();
+					function () {
+						if (i >= settings.wordList.length) {
+							clearTimeout(timer);
+							$el.trigger('wordcloudstop');
+							// console.log(d.getTime() - (new Date()).getTime());
+							
+							if (typeof settings.finishCallback == 'function') {
+								settings.finishCallback();
+							}
+							settings.finished = true;
+							return;
 						}
-						settings.finished = true;
-						return;
-					}
-					escapeTime = (new Date()).getTime();
-					putWord(settings.wordList[i][0], settings.wordList[i][1]);
-					if (exceedTime()) {
-						clearTimeout(timer);
-						settings.abort();
-						$el.trigger('wordcloudabort');
-						$el.trigger('wordcloudstop');
-
-						if (typeof settings.finishCallback == 'function') {
-							settings.finishCallback();
+						if (stop) {
+							if (typeof settings.finishCallback == 'function') {
+								settings.finishCallback();
+							}
+							settings.finished = true;
+							return;
 						}
-						settings.finished = true;
-					}
-					i++;
-				},
-				settings.wait
-			);
-				$el.one(
-					'wordcloudstart',
-					function (ev) {
-						clearTimeout(timer);
-					}
+						escapeTime = (new Date()).getTime();
+						putWord(settings.wordList[i][0], settings.wordList[i][1]);
+						if (exceedTime()) {
+							clearTimeout(timer);
+							settings.abort();
+							$el.trigger('wordcloudabort');
+							$el.trigger('wordcloudstop');
+	
+							if (typeof settings.finishCallback == 'function') {
+								settings.finishCallback();
+							}
+							settings.finished = true;
+						}
+						i++;
+					},
+					settings.wait
 				);
 			} else {
-				var stop = false;
 				window.setImmediate(
 					function loop() {
 						if (i >= settings.wordList.length) {
 							// console.log(d.getTime() - (new Date()).getTime());
 							$el.trigger('wordcloudstop');
+	
+							if (typeof settings.finishCallback == 'function') {
+								settings.finishCallback();
+							}
+							settings.finished = true;
 							return;
 						}
 						if (stop) {
+							if (typeof settings.finishCallback == 'function') {
+								settings.finishCallback();
+							}
+							settings.finished = true;
 							return;
 						}
 						escapeTime = (new Date()).getTime();
@@ -636,19 +807,30 @@ if (!window.clearImmediate) {
 							settings.abort();
 							$el.trigger('wordcloudabort');
 							$el.trigger('wordcloudstop');
+	
+							if (typeof settings.finishCallback == 'function') {
+								settings.finishCallback();
+							}
+							settings.finished = true;
 							return;
 						}
 						i++;
 						window.setImmediate(loop);
 					}
 				);
-				$el.one(
-					'wordcloudstart',
+			}
+			$el.one(
+				'wordcloudstart',
+				function (ev) {
+					clearTimeout(timer);
+				}
+			);
+			$el.one(
+					'wordcloudstop',
 					function () {
 						stop = true;
 					}
 				);
-			}
 		});
 	}
 })(jQuery);
