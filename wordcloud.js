@@ -137,6 +137,7 @@ jQuery(function ($) {
 			resetCanvasSize();
 			$('#title').show();
 			$('#controls').show();
+			$('#interactive').show();
 			$c.show();
 			setTimeout(
 				function () {
@@ -304,12 +305,15 @@ jQuery(function ($) {
 		}
 	}
 
-    FB.init({
-        appId : FB_app_id,
-        status: true,
-        cookie: true,
-        xfbml: true
-    });
+	if (FB) {
+		FB.init({
+		  oauth: true,
+			appId : FB_app_id,
+			status: true,
+			cookie: true,
+			xfbml: true
+		});
+	}
 
 	GO2.init(
 		googleClientId
@@ -350,7 +354,84 @@ jQuery(function ($) {
 			$('#help_panel').hide();
 		}
 	);
+
+	// sharer
+
+	$('#interactive .facebook').bind(
+		'click',
+		function (ev) {
+			ev.preventDefault();
+			FB.login( // call login no matter connected or not, make sure we logged in.
+				function(response) {
+					if (response.authResponse) {
+						FB.ui(
+							{
+								method: 'feed',
+								link: window.location.href,
+								//picture: '',  $c[0].toDataURL(), // won't work, always defaults to og image
+								name: $('#title').text(),
+								caption: document.title,
+								description: (function () {
+									var i = 0, s = [], n = 20;
+									do {
+										s[i] = list[i][0];
+									} while (++i < n);
+
+									return T.listHeading + s.slice(0,n).join(T.listComma) + ((list.length > n)?T.listEllipsis:'')
+								}())
+							},
+							$.noop
+						);
+					}
+				}
+			);
+		}
+	);
 	
+	$('#interactive .twitter').bind(
+		'click',
+		function (ev) {
+			ev.preventDefault();
+			window.open(
+				'https://twitter.com/home/?status='
+				+ encodeURIComponent(
+					window.location.href + ' '
+					+ $('#title').text() + ' '
+					+ (function () {
+						var i = 0, s = [], n = 10;
+						do {
+							s[i] = list[i][0];
+						} while (++i < n);
+
+						return T.listHeading + s.slice(0,n).join(T.listComma) + ((list.length > n)?T.listEllipsis:'')
+					}())
+					+ ' #HTML5WordCloud'
+				)
+			);
+		}
+	);
+
+	$('#interactive .plurk').bind(
+		'click',
+		function (ev) {
+			ev.preventDefault();
+			window.open(
+				'http://plurk.com/?status='
+				+ encodeURIComponent(
+					window.location.href
+					+ ' ('+ $('#title').text() + ') '
+					+ (function () {
+						var i = 0, s = [], n = 10;
+						do {
+							s[i] = list[i][0];
+						} while (++i < n);
+
+						return T.listHeading + s.slice(0,n).join(T.listComma) + ((list.length > n)?T.listEllipsis:'')
+					}())
+				)
+			);
+		}
+	);
 	// interaction within source panel
 	
 	var $s = $('input[name=source]');
@@ -362,9 +443,9 @@ jQuery(function ($) {
 		$('#' + type + '_entry').show();
 		$('.feed_type_name').text($(this).parent('label').text());
 
-        if (type == "fbok") {
+        if (type === "fbok" && FB) {
             FB.getLoginStatus(function(response) {
-                if (response.session) {
+                if (response.authResponse) {
                     getFbUser();
                 }
                 else {
@@ -435,7 +516,7 @@ jQuery(function ($) {
 				case 'file':
 					if (!$('#file')[0].files.length) return false;
 					window.location.hash = '#file';
-				break;	
+				break;
 				case 'wiki':
 					if (!$('#wikipedia_entry').val()) return false;
 					window.location.hash = '#html:' + 'http://zh.wikipedia.org/zh-tw/' + $('#wikipedia_entry').val();
@@ -574,21 +655,21 @@ jQuery(function ($) {
 
     function getFbUser() {
         FB.api('/me', function(response) {
-            $('#fbok_entry').html("<p>" + t('fbReady') + "</p>");
+            $('#fbok_entry p:first').html("<p>" + t('fbReady') + "</p>");
             fbUser = response;
         });
     };
 
     function showFbLogin() {
-        $('#fbok_entry').html("<p>" + t('fbNeedLogin') + "</p>");
+        $('#fbok_entry p:first').html("<p>" + t('fbNeedLogin') + "</p>");
         $('#fb_login').click(function(event) {
             FB.login(function(response) {
-                if (response.session) {
+                if (response.authResponse) {
                     getFbUser();
                 }
                 else {
                 }
-            }, {perms:'read_stream'});
+            }, {scope:'read_stream'});
         });
     };
 

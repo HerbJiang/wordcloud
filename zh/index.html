@@ -38,14 +38,19 @@
 <a id="ready" href="#" class="toggleUI ready center_btn">準備完成</a>
 <div id="controls" class="toggleUI left_tool">
 	<ul>
-		<li><a href="#" class="changetheme"><span class="famfamfam_sprite color_wheel"></span>切換色系</a></li>
+		<li><a href="#" class="changetheme"><span class="famfamfam_sprite color_wheel"></span>主題</a></li>
 		<li><a href="#" class="larger"><span class="famfamfam_sprite comment"></span>放大文字</a></li>
 		<li><a href="#" class="smaller"><span class="famfamfam_sprite comments"></span>縮小文字</a></li>
-		<!-- disable to novice user
-		<li><a href="#" class="thicker"><span class="famfamfam_sprite arrow_out"></span>增大間距</a></li>		
+		<li><a href="#" class="thicker"><span class="famfamfam_sprite arrow_out"></span>增大間距</a></li>
 		<li><a href="#" class="thiner"><span class="famfamfam_sprite arrow_in"></span>縮小間距</a></li>
-		-->
 		<li><a href="#" class="ready"><span class="famfamfam_sprite arrow_refresh"></span>重新排列</a></li>
+	</ul>
+</div>
+<div id="interactive" class="toggleUI left_tool">
+	<ul>
+		<li><a href="#" class="facebook"><span class="famfamfam_sprite facebook"></span>Facebook</a></li>
+		<li><a href="#" class="twitter"><span class="famfamfam_sprite twitter"></span>Twitter</a></li>
+		<li><a href="#" class="plurk"><span class="famfamfam_sprite plurk"></span>噗浪分享</a></li>
 		<li><a href="#" class="save"><span class="famfamfam_sprite disk"></span>儲存圖片</a></li>
 	</ul>
 </div>
@@ -114,6 +119,7 @@
 	</div>
     <div id="fbok_entry" class="entry">
         <p>讀取中…</p>
+        <p>若無法讀取，請到 <a href="https://www.facebook.com/settings?tab=applications" target="_blank">Facebook 權限頁面</a>刪除 HTML5 Word Cloud 再重新認證。</p>
     </div>
     <div id="goog_entry" class="entry">
 		<p><label><input type="radio" name="goog_type" id="goog_type_me" checked="checked" /> 我的文章</label></p>
@@ -122,7 +128,7 @@
 	<button type="submit" id="source_panel_finish">開始</button>
 	</form>
 </div>
-<div id="help_panel" class="panel">
+<div id="help_panel" class="panel toggleUI">
 	<h2>關於</h2>
 	<div class="entry">
 		<p>作者：<a href="http://timc.idv.tw/" target="_blank">timdream</a>。</p>
@@ -184,7 +190,10 @@ var T = {
 	readyList_3: '最多重複 $2 次',
 	readyList_3C: 20,
 	readyList_4: '點選後開始',
-	readyList_4C: 17
+	readyList_4C: 17,
+	listHeading: '最常出現的詞彙：',
+	listComma: '、',
+	listEllipsis: '…'
 };
 </script>
 </body>
